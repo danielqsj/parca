@@ -278,6 +278,81 @@ func (s *Server) uiHandler(uiFS fs.FS, pathPrefix string) (*http.ServeMux, error
 	return &uiHandler, nil
 }
 
+// UIHandler initialize a http.ServerMux with the UI files.
+//
+// There is currently no way to go between `http.FileServer(http.FS(uiFS))` and execute
+// templates. Taking an FS registering paths and executing templates seems to be the best option
+// for now.
+func UIHandler(uiFS fs.FS, pathPrefix, version string) (http.Handler, error) {
+	uiHandler := http.ServeMux{}
+
+	err := fs.WalkDir(uiFS, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if d.IsDir() || strings.HasSuffix(d.Name(), ".map") {
+			return nil
+		}
+
+		b, err := fs.ReadFile(uiFS, path)
+		if err != nil {
+			return fmt.Errorf("failed to read ui file %s: %w", path, err)
+		}
+
+		if strings.HasSuffix(path, ".html") {
+			tmpl, err := template.New(path).Parse(strings.Replace(string(b), "/PATH_PREFIX_VAR", "{{.PathPrefix}}", -1))
+			if err != nil {
+				return fmt.Errorf("failed to parse ui file %s: %w", path, err)
+			}
+
+			var outputBuffer bytes.Buffer
+
+			err = tmpl.Execute(&outputBuffer, struct {
+				Version    string
+				PathPrefix string
+			}{
+				version,
+				pathPrefix,
+			})
+
+			if err != nil {
+				return fmt.Errorf("failed to execute ui file %s: %w", path, err)
+			}
+
+			b = outputBuffer.Bytes()
+		}
+
+		fi, err := d.Info()
+		if err != nil {
+			return fmt.Errorf("failed to receive file info %s: %w", path, err)
+		}
+
+		paths := []string{fmt.Sprintf("/%s", path)}
+
+		if paths[0] == "/index.html" {
+			paths = append(paths, "/", "/*")
+		}
+
+		if paths[0] == "/targets/index.html" {
+			paths = append(paths, "/targets")
+		}
+
+		for _, path := range paths {
+			uiHandler.HandleFunc(pathPrefix+path, func(w http.ResponseWriter, r *http.Request) {
+				http.ServeContent(w, r, d.Name(), fi.ModTime(), bytes.NewReader(b))
+			})
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &uiHandler, nil
+}
+
 func grpcHandlerFunc(grpcServer *grpc.Server, otherHandler http.Handler, allowedCORSOrigins []string) http.Handler {
 	allowAll := false
 	if len(allowedCORSOrigins) == 1 && allowedCORSOrigins[0] == "*" {

@@ -18,6 +18,8 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -26,15 +28,16 @@ import (
 	"time"
 
 	"github.com/apache/arrow/go/v8/arrow/memory"
-	"github.com/dgraph-io/badger/v3"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/cors"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
-	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/oklog/run"
 	"github.com/polarsignals/frostdb"
 	"github.com/polarsignals/frostdb/query"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/prometheus/discovery"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/thanos-io/objstore"
@@ -51,11 +54,9 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"gopkg.in/yaml.v2"
 
-	debuginfopb "github.com/parca-dev/parca/gen/proto/go/parca/debuginfo/v1alpha1"
 	metastorepb "github.com/parca-dev/parca/gen/proto/go/parca/metastore/v1alpha1"
-	profilestorepb "github.com/parca-dev/parca/gen/proto/go/parca/profilestore/v1alpha1"
-	querypb "github.com/parca-dev/parca/gen/proto/go/parca/query/v1alpha1"
-	scrapepb "github.com/parca-dev/parca/gen/proto/go/parca/scrape/v1alpha1"
+	"github.com/parca-dev/parca/gen/proto/go/parca/query/v1alpha1/queryv1alpha1connect"
+	"github.com/parca-dev/parca/gen/proto/go/parca/scrape/v1alpha1/scrapev1alpha1connect"
 	sharepb "github.com/parca-dev/parca/gen/proto/go/share"
 	"github.com/parca-dev/parca/pkg/config"
 	"github.com/parca-dev/parca/pkg/debuginfo"
@@ -67,6 +68,7 @@ import (
 	"github.com/parca-dev/parca/pkg/server"
 	"github.com/parca-dev/parca/pkg/symbol"
 	"github.com/parca-dev/parca/pkg/symbolizer"
+	"github.com/parca-dev/parca/ui"
 )
 
 const (
@@ -396,54 +398,79 @@ func Run(ctx context.Context, logger log.Logger, reg *prometheus.Registry, flags
 			cancel()
 		},
 	)
-	parcaserver := server.NewServer(reg, version)
+
+	allowAll := false
+	if len(flags.CORSAllowedOrigins) == 1 && flags.CORSAllowedOrigins[0] == "*" {
+		allowAll = true
+	}
+	origins := map[string]struct{}{}
+	for _, o := range flags.CORSAllowedOrigins {
+		origins[o] = struct{}{}
+	}
+
+	r := chi.NewRouter()
+	r.Use(cors.Handler(cors.Options{
+		AllowOriginFunc: func(r *http.Request, origin string) bool {
+			_, found := origins[origin]
+			return found || allowAll
+		},
+		AllowedHeaders: []string{"*"},
+		AllowedMethods: []string{
+			http.MethodHead,
+			http.MethodGet,
+			http.MethodPost,
+			http.MethodPut,
+			http.MethodPatch,
+			http.MethodDelete,
+		},
+		AllowCredentials: true,
+	}))
+
+	// Strip the subpath
+	uiFS, err := fs.Sub(ui.FS, "packages/app/web/build")
+	if err != nil {
+		return fmt.Errorf("failed to initialize UI filesystem: %w", err)
+	}
+
+	handler, err := server.UIHandler(uiFS, flags.PathPrefix, version)
+	if err != nil {
+		return err
+	}
+
+	r.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
+	// pprof endpoints
+
+	r.Route("/api/", func(r chi.Router) {
+		queryPattern, queryHandler := queryv1alpha1connect.NewQueryServiceHandler(q)
+		r.Mount(queryPattern, http.StripPrefix("/api", queryHandler))
+
+		scrapePattern, scrapeHandler := scrapev1alpha1connect.NewScrapeServiceHandler(m)
+		r.Mount(scrapePattern, http.StripPrefix("/api", scrapeHandler))
+	})
+
+	r.Mount("/", handler)
+
+	parcaserver := http.Server{
+		Addr:    flags.Port,
+		Handler: r,
+	}
+
 	gr.Add(
 		func() error {
-			return parcaserver.ListenAndServe(
-				ctx,
-				logger,
-				flags.Port,
-				flags.CORSAllowedOrigins,
-				flags.PathPrefix,
-				server.RegisterableFunc(func(ctx context.Context, srv *grpc.Server, mux *runtime.ServeMux, endpoint string, opts []grpc.DialOption) error {
-					debuginfopb.RegisterDebugInfoServiceServer(srv, dbgInfo)
-					profilestorepb.RegisterProfileStoreServiceServer(srv, s)
-					querypb.RegisterQueryServiceServer(srv, q)
-					scrapepb.RegisterScrapeServiceServer(srv, m)
-
-					if err := debuginfopb.RegisterDebugInfoServiceHandlerFromEndpoint(ctx, mux, endpoint, opts); err != nil {
-						return err
-					}
-
-					if err := profilestorepb.RegisterProfileStoreServiceHandlerFromEndpoint(ctx, mux, endpoint, opts); err != nil {
-						return err
-					}
-
-					if err := querypb.RegisterQueryServiceHandlerFromEndpoint(ctx, mux, endpoint, opts); err != nil {
-						return err
-					}
-
-					if err := scrapepb.RegisterScrapeServiceHandlerFromEndpoint(ctx, mux, endpoint, opts); err != nil {
-						return err
-					}
-
-					return nil
-				}),
-			)
-		},
-		func(_ error) {
-			ctx, cancel := context.WithTimeout(ctx, 30*time.Second) // TODO make this a graceful shutdown config setting
+			return parcaserver.ListenAndServe()
+		}, func(err error) {
+			ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
 
 			level.Debug(logger).Log("msg", "server shutting down")
-			err := parcaserver.Shutdown(ctx)
+			err = parcaserver.Shutdown(ctx)
 			if err != nil && !errors.Is(err, context.Canceled) {
 				level.Error(logger).Log("msg", "error shutting down server", "err", err)
 			}
 
-			// Close the columnstore after the parcaserver has shutdown to ensure no more writes occur against it.
+			// Close FrostDB after the parcaserver has shutdown to ensure no more writes occur against it.
 			if err := col.Close(); err != nil {
-				level.Error(logger).Log("msg", "error closing columnstore", "err", err)
+				level.Error(logger).Log("msg", "error closing frostDB", "err", err)
 			}
 		},
 	)
@@ -582,35 +609,37 @@ func runScraper(
 		},
 	)
 
-	parcaserver := server.NewServer(reg, version)
-	gr.Add(
-		func() error {
-			return parcaserver.ListenAndServe(
-				ctx,
-				logger,
-				flags.Port,
-				flags.CORSAllowedOrigins,
-				flags.PathPrefix,
-				server.RegisterableFunc(func(ctx context.Context, srv *grpc.Server, mux *runtime.ServeMux, endpoint string, opts []grpc.DialOption) error {
-					scrapepb.RegisterScrapeServiceServer(srv, m)
-					if err := scrapepb.RegisterScrapeServiceHandlerFromEndpoint(ctx, mux, endpoint, opts); err != nil {
-						return err
-					}
-					return nil
-				}),
-			)
-		},
-		func(_ error) {
-			ctx, cancel := context.WithTimeout(ctx, 30*time.Second) // TODO make this a graceful shutdown config setting
-			defer cancel()
+	// TODO: Use connect-go in runScraper too
 
-			level.Debug(logger).Log("msg", "server shutting down")
-			err := parcaserver.Shutdown(ctx)
-			if err != nil && !errors.Is(err, context.Canceled) {
-				level.Error(logger).Log("msg", "error shutting down server", "err", err)
-			}
-		},
-	)
+	//parcaserver := server.NewServer(reg, version)
+	//gr.Add(
+	//	func() error {
+	//		return parcaserver.ListenAndServe(
+	//			ctx,
+	//			logger,
+	//			flags.Port,
+	//			flags.CORSAllowedOrigins,
+	//			flags.PathPrefix,
+	//			server.RegisterableFunc(func(ctx context.Context, srv *grpc.Server, mux *runtime.ServeMux, endpoint string, opts []grpc.DialOption) error {
+	//				scrapepb.RegisterScrapeServiceServer(srv, m)
+	//				if err := scrapepb.RegisterScrapeServiceHandlerFromEndpoint(ctx, mux, endpoint, opts); err != nil {
+	//					return err
+	//				}
+	//				return nil
+	//			}),
+	//		)
+	//	},
+	//	func(_ error) {
+	//		ctx, cancel := context.WithTimeout(ctx, 30*time.Second) // TODO make this a graceful shutdown config setting
+	//		defer cancel()
+	//
+	//		level.Debug(logger).Log("msg", "server shutting down")
+	//		err := parcaserver.Shutdown(ctx)
+	//		if err != nil && !errors.Is(err, context.Canceled) {
+	//			level.Error(logger).Log("msg", "error shutting down server", "err", err)
+	//		}
+	//	},
+	//)
 
 	level.Info(logger).Log("msg", "running Parca in scrape mode", "version", version)
 	if err := gr.Run(); err != nil {

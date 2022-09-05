@@ -12,11 +12,12 @@
 // limitations under the License.
 
 import React, {useEffect, useState} from 'react';
-import {ScrapeServiceClient, Target, TargetsResponse, TargetsRequest_State} from '@parca/client';
 import {RpcError} from '@protobuf-ts/runtime-rpc';
 import {EmptyState} from '@parca/components';
 import TargetsTable from '../components/Targets/TargetsTable';
-import {GrpcWebFetchTransport} from '@protobuf-ts/grpcweb-transport';
+import {createConnectTransport, createPromiseClient, PromiseClient} from '@bufbuild/connect-web';
+import {ScrapeService} from '@parca/client/src/parca/scrape/v1alpha1/scrape_connectweb';
+import {Target, TargetsRequest_State, TargetsResponse} from '@parca/client';
 
 const apiEndpoint = process.env.REACT_APP_PUBLIC_API_ENDPOINT;
 
@@ -25,18 +26,17 @@ export interface ITargetsResult {
   error: RpcError | null;
 }
 
-export const useTargets = (client: ScrapeServiceClient): ITargetsResult => {
+export const useTargets = (client: PromiseClient<typeof ScrapeService>): ITargetsResult => {
   const [result, setResult] = useState<ITargetsResult>({
     response: null,
     error: null,
   });
 
   useEffect(() => {
-    const call = client.targets({
-      state: TargetsRequest_State.ANY_UNSPECIFIED,
-    });
-
-    call.response
+    client
+      .targets({
+        state: TargetsRequest_State.ANY_UNSPECIFIED,
+      })
       .then(response => setResult({response, error: null}))
       .catch(error => setResult({error, response: null}));
   }, [client]);
@@ -44,9 +44,10 @@ export const useTargets = (client: ScrapeServiceClient): ITargetsResult => {
   return result;
 };
 
-const scrapeClient = new ScrapeServiceClient(
-  new GrpcWebFetchTransport({
-    baseUrl: apiEndpoint === undefined ? '/api' : `${apiEndpoint}/api`,
+const scrapeClient = createPromiseClient(
+  ScrapeService,
+  createConnectTransport({
+    baseUrl: apiEndpoint === undefined ? '/api' : `${apiEndpoint}/api`
   })
 );
 

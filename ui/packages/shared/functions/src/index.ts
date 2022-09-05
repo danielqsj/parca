@@ -69,7 +69,7 @@ export const convertTime = (value: number, from: TimeUnits, to: TimeUnits): numb
     return value;
   }
 
-  return (value * startUnit.multiplier) / endUnit.multiplier;
+  return (Number(value) * startUnit.multiplier) / endUnit.multiplier;
 };
 
 export const formatDuration = (timeObject: TimeObject, to?: number): string => {
