@@ -11,16 +11,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {GrpcWebFetchTransport} from '@protobuf-ts/grpcweb-transport';
-import {QueryServiceClient} from '@parca/client';
+import {QueryService} from '@parca/client';
 import {useLocation, useNavigate} from 'react-router-dom';
-import {parseParams, convertToQueryParams} from '@parca/functions';
+import {convertToQueryParams, parseParams} from '@parca/functions';
 import {ProfileExplorer} from '@parca/components';
+import {createConnectTransport, createPromiseClient} from '@bufbuild/connect-web';
 
 const apiEndpoint = process.env.REACT_APP_PUBLIC_API_ENDPOINT;
 
-const queryClient = new QueryServiceClient(
-  new GrpcWebFetchTransport({
+const queryClient = createPromiseClient(
+  QueryService,
+  createConnectTransport({
     baseUrl: apiEndpoint === undefined ? '/api' : `${apiEndpoint}/api`,
   })
 );

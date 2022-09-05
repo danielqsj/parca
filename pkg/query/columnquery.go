@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/bufbuild/connect-go"
 	"github.com/go-kit/log"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -64,86 +65,103 @@ func NewColumnQueryAPI(
 	}
 }
 
-// Labels issues a labels request against the storage.
-func (q *ColumnQueryAPI) Labels(ctx context.Context, req *pb.LabelsRequest) (*pb.LabelsResponse, error) {
-	vals, err := q.querier.Labels(ctx, req.Match, req.Start.AsTime(), req.End.AsTime())
+func (q *ColumnQueryAPI) Series(ctx context.Context, c *connect.Request[pb.SeriesRequest]) (*connect.Response[pb.SeriesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, fmt.Errorf("parca.query.v1alpha1.QueryService.Series is not implemented"))
+}
+
+func (q *ColumnQueryAPI) Labels(ctx context.Context, req *connect.Request[pb.LabelsRequest]) (*connect.Response[pb.LabelsResponse], error) {
+	vals, err := q.querier.Labels(ctx, req.Msg.Match, req.Msg.Start.AsTime(), req.Msg.End.AsTime())
 	if err != nil {
-		return nil, err
+		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	return &pb.LabelsResponse{
+	return connect.NewResponse(&pb.LabelsResponse{
 		LabelNames: vals,
-	}, nil
+	}), nil
 }
 
-// Values issues a values request against the storage.
-func (q *ColumnQueryAPI) Values(ctx context.Context, req *pb.ValuesRequest) (*pb.ValuesResponse, error) {
-	vals, err := q.querier.Values(ctx, req.LabelName, req.Match, req.Start.AsTime(), req.End.AsTime())
+func (q *ColumnQueryAPI) Values(ctx context.Context, req *connect.Request[pb.ValuesRequest]) (*connect.Response[pb.ValuesResponse], error) {
+	vals, err := q.querier.Values(ctx, req.Msg.LabelName, req.Msg.Match, req.Msg.Start.AsTime(), req.Msg.End.AsTime())
 	if err != nil {
-		return nil, err
+		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	return &pb.ValuesResponse{
+	return connect.NewResponse(&pb.ValuesResponse{
 		LabelValues: vals,
-	}, nil
+	}), nil
 }
 
-// QueryRange issues a range query against the storage.
-func (q *ColumnQueryAPI) QueryRange(ctx context.Context, req *pb.QueryRangeRequest) (*pb.QueryRangeResponse, error) {
-	if err := req.Validate(); err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
-
-	res, err := q.querier.QueryRange(ctx, req.Query, req.Start.AsTime(), req.End.AsTime(), req.Limit)
-	if err != nil {
-		return nil, err
-	}
-
-	return &pb.QueryRangeResponse{
-		Series: res,
-	}, nil
+func (q *ColumnQueryAPI) QueryRange(ctx context.Context, c *connect.Request[pb.QueryRangeRequest]) (*connect.Response[pb.QueryRangeResponse], error) {
+	// TODO implement me
+	panic("implement me")
 }
 
-// Types returns the available types of profiles.
-func (q *ColumnQueryAPI) ProfileTypes(ctx context.Context, req *pb.ProfileTypesRequest) (*pb.ProfileTypesResponse, error) {
-	types, err := q.querier.ProfileTypes(ctx)
-	if err != nil {
-		return nil, err
-	}
+//// QueryRange issues a range query against the storage.
+//func (q *ColumnQueryAPI) QueryRange(ctx context.Context, req *pb.QueryRangeRequest) (*pb.QueryRangeResponse, error) {
+//	if err := req.Validate(); err != nil {
+//		return nil, status.Error(codes.InvalidArgument, err.Error())
+//	}
+//
+//	res, err := q.querier.QueryRange(ctx, req.Query, req.Start.AsTime(), req.End.AsTime(), req.Limit)
+//	if err != nil {
+//		return nil, err
+//	}
+//
+//	return &pb.QueryRangeResponse{
+//		Series: res,
+//	}, nil
+//}
 
-	return &pb.ProfileTypesResponse{
-		Types: types,
-	}, nil
+func (q *ColumnQueryAPI) ProfileTypes(ctx context.Context, c *connect.Request[pb.ProfileTypesRequest]) (*connect.Response[pb.ProfileTypesResponse], error) {
+	// TODO implement me
+	panic("implement me")
 }
 
-// Query issues a instant query against the storage.
-func (q *ColumnQueryAPI) Query(ctx context.Context, req *pb.QueryRequest) (*pb.QueryResponse, error) {
-	if err := req.Validate(); err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
+//// ProfileTypes returns the available types of profiles.
+//func (q *ColumnQueryAPI) ProfileTypes(ctx context.Context, req *pb.ProfileTypesRequest) (*pb.ProfileTypesResponse, error) {
+//	types, err := q.querier.ProfileTypes(ctx)
+//	if err != nil {
+//		return nil, err
+//	}
+//
+//	return &pb.ProfileTypesResponse{
+//		Types: types,
+//	}, nil
+//}
 
-	var (
-		p   *profile.Profile
-		err error
-	)
-
-	switch req.Mode {
-	case pb.QueryRequest_MODE_SINGLE_UNSPECIFIED:
-		p, err = q.selectSingle(ctx, req.GetSingle())
-	case pb.QueryRequest_MODE_MERGE:
-		p, err = q.selectMerge(ctx, req.GetMerge())
-	case pb.QueryRequest_MODE_DIFF:
-		p, err = q.selectDiff(ctx, req.GetDiff())
-	default:
-		return nil, status.Error(codes.InvalidArgument, "unknown query mode")
-	}
-
-	if err != nil {
-		return nil, err
-	}
-
-	return q.renderReport(ctx, p, req.GetReportType())
+func (q *ColumnQueryAPI) Query(ctx context.Context, c *connect.Request[pb.QueryRequest]) (*connect.Response[pb.QueryResponse], error) {
+	// TODO implement me
+	panic("implement me")
 }
+
+//// Query issues a instant query against the storage.
+//func (q *ColumnQueryAPI) Query(ctx context.Context, req *pb.QueryRequest) (*pb.QueryResponse, error) {
+//	if err := req.Validate(); err != nil {
+//		return nil, status.Error(codes.InvalidArgument, err.Error())
+//	}
+//
+//	var (
+//		p   *profile.Profile
+//		err error
+//	)
+//
+//	switch req.Mode {
+//	case pb.QueryRequest_MODE_SINGLE_UNSPECIFIED:
+//		p, err = q.selectSingle(ctx, req.GetSingle())
+//	case pb.QueryRequest_MODE_MERGE:
+//		p, err = q.selectMerge(ctx, req.GetMerge())
+//	case pb.QueryRequest_MODE_DIFF:
+//		p, err = q.selectDiff(ctx, req.GetDiff())
+//	default:
+//		return nil, status.Error(codes.InvalidArgument, "unknown query mode")
+//	}
+//
+//	if err != nil {
+//		return nil, err
+//	}
+//
+//	return q.renderReport(ctx, p, req.GetReportType())
+//}
 
 func (q *ColumnQueryAPI) renderReport(ctx context.Context, p *profile.Profile, typ pb.QueryRequest_ReportType) (*pb.QueryResponse, error) {
 	ctx, span := q.tracer.Start(ctx, "renderReport")
@@ -279,20 +297,25 @@ func (q *ColumnQueryAPI) selectProfileForDiff(ctx context.Context, s *pb.Profile
 	}
 }
 
-func (q *ColumnQueryAPI) ShareProfile(ctx context.Context, req *pb.ShareProfileRequest) (*pb.ShareProfileResponse, error) {
-	req.QueryRequest.ReportType = pb.QueryRequest_REPORT_TYPE_PPROF
-	resp, err := q.Query(ctx, req.QueryRequest)
-	if err != nil {
-		return nil, err
-	}
-	uploadResp, err := q.shareClient.Upload(ctx, &sharepb.UploadRequest{
-		Profile:     resp.GetPprof(),
-		Description: *req.Description,
-	})
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to upload profile: %s", err.Error())
-	}
-	return &pb.ShareProfileResponse{
-		Link: uploadResp.Link,
-	}, nil
+func (q *ColumnQueryAPI) ShareProfile(ctx context.Context, c *connect.Request[pb.ShareProfileRequest]) (*connect.Response[pb.ShareProfileResponse], error) {
+	// TODO implement me
+	panic("implement me")
 }
+
+//func (q *ColumnQueryAPI) ShareProfile(ctx context.Context, req *pb.ShareProfileRequest) (*pb.ShareProfileResponse, error) {
+//	req.QueryRequest.ReportType = pb.QueryRequest_REPORT_TYPE_PPROF
+//	resp, err := q.Query(ctx, req.QueryRequest)
+//	if err != nil {
+//		return nil, err
+//	}
+//	uploadResp, err := q.shareClient.Upload(ctx, &sharepb.UploadRequest{
+//		Profile:     resp.GetPprof(),
+//		Description: *req.Description,
+//	})
+//	if err != nil {
+//		return nil, status.Errorf(codes.Internal, "failed to upload profile: %s", err.Error())
+//	}
+//	return &pb.ShareProfileResponse{
+//		Link: uploadResp.Link,
+//	}, nil
+//}
