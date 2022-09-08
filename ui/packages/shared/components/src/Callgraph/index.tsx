@@ -14,20 +14,120 @@
 import {useState, useEffect, useRef} from 'react';
 import graphviz from 'graphviz-wasm';
 import * as d3 from 'd3';
-import {Stage, Layer} from 'react-konva';
+import {Stage, Layer, Circle, Arrow} from 'react-konva';
 import {GraphTooltip as Tooltip} from '@parca/components';
 import {Callgraph as CallgraphType} from '@parca/client';
 import {jsonToDot} from './utils';
-import Node, {INode} from './Node';
-import Edge, {IEdge} from './Edge';
 import type {HoveringNode} from '../GraphTooltip';
+import {parseEdgePos} from './utils';
+
+interface INode {
+  x: number;
+  y: number;
+  data: {id: string};
+  opacity: number;
+  color: string;
+  mouseX?: number;
+  mouseY?: number;
+}
+
+interface NodeProps {
+  node: INode;
+  hoveredNode: INode | null;
+  setHoveredNode: (node: INode | null) => void;
+  nodeRadius: number;
+}
+
+interface IEdge {
+  source: number;
+  target: number;
+  color: string;
+  opacity: number;
+  points: string;
+}
+interface EdgeProps {
+  edge: IEdge;
+  sourceNode: {x: number; y: number};
+  targetNode: {x: number; y: number};
+  xScale: (x: number) => number;
+  yScale: (y: number) => number;
+  nodeRadius: number;
+}
 interface Props {
   graph: CallgraphType;
   sampleUnit: string;
   width: number;
+  colorRange: [string, string];
 }
 
-const Callgraph = ({graph, sampleUnit, width}: Props): JSX.Element => {
+const Node = ({
+  node,
+  hoveredNode,
+  setHoveredNode,
+  nodeRadius: defaultRadius,
+}: NodeProps): JSX.Element => {
+  const {
+    data: {id},
+    x,
+    y,
+    color,
+  } = node;
+
+  const hoverRadius = defaultRadius + 3;
+  const isHovered = Boolean(hoveredNode) && hoveredNode?.data.id === id;
+
+  return (
+    <Circle
+      x={+x}
+      y={+y}
+      draggable
+      radius={isHovered ? hoverRadius : defaultRadius}
+      fill={color}
+      onMouseOver={() => {
+        setHoveredNode({...node, mouseX: x, mouseY: y});
+      }}
+      onMouseOut={() => {
+        setHoveredNode(null);
+      }}
+    />
+  );
+};
+
+const Edge = ({
+  edge,
+  sourceNode,
+  targetNode,
+  xScale,
+  yScale,
+  nodeRadius,
+}: EdgeProps): JSX.Element => {
+  const {points, color, source, target, opacity} = edge;
+
+  const scaledPoints = parseEdgePos({
+    pos: points,
+    xScale,
+    yScale,
+    source: [sourceNode.x, sourceNode.y],
+    target: [targetNode.x, targetNode.y],
+    nodeRadius,
+    isSelfLoop: source === target,
+  });
+
+  return (
+    <Arrow
+      points={scaledPoints}
+      bezier={true}
+      stroke={color}
+      strokeWidth={3}
+      pointerLength={10}
+      pointerWidth={10}
+      fill={color}
+      opacity={opacity}
+    />
+  );
+};
+
+const Callgraph = ({graph, sampleUnit, width, colorRange}: Props): JSX.Element => {
   const containerRef = useRef<Element>(null);
   const [graphData, setGraphData] = useState<any>(null);
   const [hoveredNode, setHoveredNode] = useState<INode | null>(null);
@@ -37,7 +137,7 @@ const Callgraph = ({graph, sampleUnit, width}: Props): JSX.Element => {
   useEffect(() => {
     const getDataWithPositions = async (): Promise<void> => {
       // 1. Translate JSON to 'dot' graph string
-      const dataAsDot = jsonToDot({graph, width, nodeRadius});
+      const dataAsDot = jsonToDot({graph, width: width - 30, nodeRadius});
 
       // 2. Use Graphviz-WASM to translate the 'dot' graph to a 'JSON' graph
       await graphviz.loadWASM(); // need to load the WASM instance and wait for it
@@ -64,9 +164,14 @@ const Callgraph = ({graph, sampleUnit, width}: Props): JSX.Element => {
     .slice(0, 2);
 
   const colorScale = d3
-    .scaleSequentialLog(d3.interpolateRdGy)
+    .scaleSequentialLog(d3.interpolateBlues)
     .domain([...valueRange])
-    .range(['lightgrey', 'red']);
+    .range(colorRange);
+  const colorOpacityScale = d3
+    .scaleSequentialLog()
+    .domain([...valueRange])
+    .range([0.2, 1]);
+
   const graphBB = boundingBox.split(',');
   const xScale = d3.scaleLinear().domain([0, graphBB[2]]).range([0, width]);
   const yScale = d3.scaleLinear().domain([0, graphBB[3]]).range([0, height]);
@@ -78,7 +183,7 @@ const Callgraph = ({graph, sampleUnit, width}: Props): JSX.Element => {
       id: object._gvid,
       x: xScale(parseInt(pos[0])),
       y: yScale(parseInt(pos[1])),
-      color: colorScale(object.cumulative),
+      color: colorScale(+object.cumulative),
       data: rawNodes.find(n => n.id === object.name),
     };
   });
@@ -88,14 +193,15 @@ const Callgraph = ({graph, sampleUnit, width}: Props): JSX.Element => {
     source: edge.head,
     target: edge.tail,
     points: edge.pos,
-    color: colorScale(+edge.cumulative),
+    color: colorRange[1],
+    opacity: colorOpacityScale(+edge.cumulative),
   }));
 
   return (
     <div className="relative">
       {/* @ts-expect-error */}
       <div className={`w-[${width}px] h-[${height}px]`} ref={containerRef}>
-        <Stage width={width} height={height}>
+        <Stage width={width + 30} height={height}>
           <Layer>
             {edges.map((edge: IEdge) => {
               const sourceNode = nodes.find(n => n.id === edge.source);

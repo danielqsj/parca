@@ -13,7 +13,7 @@
 
 import React, {useEffect, useMemo, useState} from 'react';
 
-import {parseParams} from '@parca/functions';
+import {getNewSpanColor, parseParams} from '@parca/functions';
 import useUIFeatureFlag from '@parca/functions/useUIFeatureFlag';
 import {QueryServiceClient, Flamegraph, Top, Callgraph} from '@parca/client';
 import {
@@ -24,12 +24,14 @@ import {
   Callgraph as CallgraphComponent,
 } from '@parca/components';
 import {useContainerDimensions} from '@parca/dynamicsize';
+import {useAppSelector, selectDarkMode} from '@parca/store';
 
 import ProfileShareButton from './components/ProfileShareButton';
 import ProfileIcicleGraph from './ProfileIcicleGraph';
 import {ProfileSource} from './ProfileSource';
 import TopTable from './TopTable';
 import useDelayedLoader from './useDelayedLoader';
+import {scaleLinear} from 'd3';
 
 import './ProfileView.styles.css';
 
@@ -112,6 +114,7 @@ export const ProfileView = ({
   const {ref, dimensions} = useContainerDimensions();
   const [curPath, setCurPath] = useState<string[]>([]);
   const {currentView, setCurrentView} = profileVisState;
+  const isDarkMode = useAppSelector(selectDarkMode);
 
   const [callgraphEnabled] = useUIFeatureFlag('callgraph');
 
@@ -173,6 +176,10 @@ export const ProfileView = ({
     const router = parseParams(window.location.search);
     navigateTo('/', {...router, ...{currentProfileView: view}});
   };
+
+  const maxColor: string = getNewSpanColor(isDarkMode);
+  const minColor: string = scaleLinear(['white', maxColor])(0.3);
+  const colorRange: [string, string] = [minColor, maxColor];
 
   return (
     <>
@@ -272,6 +279,7 @@ export const ProfileView = ({
                       graph={callgraphData.data}
                       sampleUnit={sampleUnit}
                       width={dimensions?.width}
+                      colorRange={colorRange}
                     />
                   )}
                 </div>
