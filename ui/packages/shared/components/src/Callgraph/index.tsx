@@ -14,7 +14,7 @@
 import {useState, useEffect, useRef} from 'react';
 import graphviz from 'graphviz-wasm';
 import * as d3 from 'd3';
-import {Stage, Layer, Circle, Arrow} from 'react-konva';
+import {Stage, Layer, Circle, Arrow, Text, Label} from 'react-konva';
 import {GraphTooltip as Tooltip} from '@parca/components';
 import {Callgraph as CallgraphType} from '@parca/client';
 import {jsonToDot} from './utils';
@@ -25,6 +25,7 @@ interface INode {
   x: number;
   y: number;
   data: {id: string};
+  functionName: string;
   opacity: number;
   color: string;
   mouseX?: number;
@@ -71,25 +72,38 @@ const Node = ({
     x,
     y,
     color,
+    functionName,
   } = node;
 
   const hoverRadius = defaultRadius + 3;
   const isHovered = Boolean(hoveredNode) && hoveredNode?.data.id === id;
 
   return (
-    <Circle
-      x={+x}
-      y={+y}
-      draggable
-      radius={isHovered ? hoverRadius : defaultRadius}
-      fill={color}
-      onMouseOver={() => {
-        setHoveredNode({...node, mouseX: x, mouseY: y});
-      }}
-      onMouseOut={() => {
-        setHoveredNode(null);
-      }}
-    />
+    <Label x={+x} y={+y}>
+      <Circle
+        draggable
+        radius={isHovered ? hoverRadius : defaultRadius}
+        fill={color}
+        onMouseOver={() => {
+          setHoveredNode({...node, mouseX: x, mouseY: y});
+        }}
+        onMouseOut={() => {
+          setHoveredNode(null);
+        }}
+      />
+      <Text
+        text={functionName.substring(0, 1)}
+        fontSize={16}
+        fill="white"
+        width={defaultRadius}
+        height={defaultRadius}
+        x={-defaultRadius / 2}
+        y={-defaultRadius / 2}
+        align="center"
+        verticalAlign="middle"
+        listening={false}
+      />
+    </Label>
   );
 };
 
