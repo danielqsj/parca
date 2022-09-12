@@ -19,9 +19,8 @@ import {GraphTooltip as Tooltip} from '@parca/components';
 import {Callgraph as CallgraphType} from '@parca/client';
 import {useAppSelector, selectSearchNodeString} from '@parca/store';
 import {isSearchMatch} from '@parca/functions';
-import {jsonToDot} from './utils';
+import {jsonToDot, parseEdgePos} from './utils';
 import type {HoveringNode} from '../GraphTooltip';
-import {parseEdgePos} from './utils';
 
 interface INode {
   x: number;
