@@ -15,14 +15,8 @@ import React, {useEffect, useMemo, useState} from 'react';
 
 import {getNewSpanColor, parseParams} from '@parca/functions';
 import useUIFeatureFlag from '@parca/functions/useUIFeatureFlag';
-import {QueryServiceClient, Flamegraph, Top, Callgraph} from '@parca/client';
-import {
-  Button,
-  Card,
-  SearchNodes,
-  useParcaTheme,
-  Callgraph as CallgraphComponent,
-} from '@parca/components';
+import {QueryServiceClient, Flamegraph, Top, Callgraph as CallgraphType} from '@parca/client';
+import {Button, Card, SearchNodes, useParcaTheme, Callgraph} from '@parca/components';
 import {useContainerDimensions} from '@parca/dynamicsize';
 import {useAppSelector, selectDarkMode} from '@parca/store';
 
@@ -51,7 +45,7 @@ interface TopTableData {
 
 interface CallgraphData {
   loading: boolean;
-  data?: Callgraph;
+  data?: CallgraphType;
   error?: any;
 }
 
@@ -178,8 +172,12 @@ export const ProfileView = ({
   };
 
   const maxColor: string = getNewSpanColor(isDarkMode);
-  const minColor: string = scaleLinear(['white', maxColor])(0.3);
-  const colorRange: [string, string] = [minColor, maxColor];
+  // TODO: fix colors for dark mode
+  const getMinColor = (isDarkMode): string => {
+    return scaleLinear([isDarkMode ? 'black' : 'white', maxColor])(0.3);
+  };
+
+  const colorRange: [string, string] = [getMinColor(isDarkMode), maxColor];
 
   return (
     <>
@@ -275,7 +273,7 @@ export const ProfileView = ({
               {currentView === 'callgraph' && callgraphData?.data != null && (
                 <div className="w-full">
                   {dimensions?.width !== undefined && (
-                    <CallgraphComponent
+                    <Callgraph
                       graph={callgraphData.data}
                       sampleUnit={sampleUnit}
                       width={dimensions?.width}
