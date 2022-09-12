@@ -32,6 +32,7 @@ interface INode {
   color: string;
   mouseX?: number;
   mouseY?: number;
+  radius: number;
 }
 
 interface NodeProps {
@@ -48,6 +49,7 @@ interface IEdge {
   color: string;
   opacity: number;
   points: string;
+  nodeRadius: number;
 }
 interface EdgeProps {
   edge: IEdge;
@@ -158,7 +160,7 @@ const Callgraph = ({graph, sampleUnit, width, colorRange}: Props): JSX.Element =
   useEffect(() => {
     const getDataWithPositions = async (): Promise<void> => {
       // 1. Translate JSON to 'dot' graph string
-      const dataAsDot = jsonToDot({graph, width: width - 30, nodeRadius});
+      const dataAsDot = jsonToDot({graph, width, nodeRadius});
 
       // 2. Use Graphviz-WASM to translate the 'dot' graph to a 'JSON' graph
       await graphviz.loadWASM(); // need to load the WASM instance and wait for it
@@ -176,7 +178,7 @@ const Callgraph = ({graph, sampleUnit, width, colorRange}: Props): JSX.Element =
   // 3. Render the graph with calculated layout in Canvas container
   if (width == null || graphData == null) return <></>;
 
-  const height = width;
+  const height = (2 * width) / 3;
   const {objects, edges: gvizEdges, bb: boundingBox} = JSON.parse(graphData);
 
   const valueRange: number[] = d3
@@ -186,16 +188,24 @@ const Callgraph = ({graph, sampleUnit, width, colorRange}: Props): JSX.Element =
 
   const colorScale = d3
     .scaleSequentialLog(d3.interpolateBlues)
-    .domain([...valueRange])
+    .domain(valueRange)
     .range(colorRange);
-  const colorOpacityScale = d3
-    .scaleSequentialLog()
-    .domain([...valueRange])
-    .range([0.2, 1]);
+  const colorOpacityScale = d3.scaleSequentialLog().domain(valueRange).range([0.2, 1]);
+  const nodeRadiusScale = d3
+    .scaleLog()
+    .domain(valueRange)
+    .range([nodeRadius - 2, nodeRadius + 3]);
 
+  const margin = 15;
   const graphBB = boundingBox.split(',');
-  const xScale = d3.scaleLinear().domain([0, graphBB[2]]).range([0, width]);
-  const yScale = d3.scaleLinear().domain([0, graphBB[3]]).range([0, height]);
+  const xScale = d3
+    .scaleLinear()
+    .domain([0, graphBB[2]])
+    .range([0, width - 2 * margin]);
+  const yScale = d3
+    .scaleLinear()
+    .domain([0, graphBB[3]])
+    .range([0, height - 2 * margin]);
 
   const nodes = objects.map(object => {
     const pos = object.pos.split(',');
@@ -206,6 +216,7 @@ const Callgraph = ({graph, sampleUnit, width, colorRange}: Props): JSX.Element =
       y: yScale(parseInt(pos[1])),
       color: colorScale(+object.cumulative),
       data: rawNodes.find(n => n.id === object.name),
+      radius: nodeRadiusScale(+object.cumulative),
     };
   });
 
@@ -216,14 +227,15 @@ const Callgraph = ({graph, sampleUnit, width, colorRange}: Props): JSX.Element =
     points: edge.pos,
     color: colorRange[1],
     opacity: colorOpacityScale(+edge.cumulative),
+    nodeRadius: nodeRadiusScale(+edge.cumulative),
   }));
 
   return (
     <div className="relative">
       {/* @ts-expect-error */}
       <div className={`w-[${width}px] h-[${height}px]`} ref={containerRef}>
-        <Stage width={width + 30} height={height}>
-          <Layer>
+        <Stage width={width} height={height}>
+          <Layer offsetX={-margin} offsetY={-margin}>
             {edges.map((edge: IEdge) => {
               const sourceNode = nodes.find(n => n.id === edge.source);
               const targetNode = nodes.find(n => n.id === edge.target);
@@ -235,7 +247,7 @@ const Callgraph = ({graph, sampleUnit, width, colorRange}: Props): JSX.Element =
                   yScale={yScale}
                   sourceNode={sourceNode}
                   targetNode={targetNode}
-                  nodeRadius={nodeRadius}
+                  nodeRadius={edge.nodeRadius}
                 />
               );
             })}
@@ -245,7 +257,7 @@ const Callgraph = ({graph, sampleUnit, width, colorRange}: Props): JSX.Element =
                 node={node}
                 hoveredNode={hoveredNode}
                 setHoveredNode={setHoveredNode}
-                nodeRadius={nodeRadius}
+                nodeRadius={node.radius}
                 currentSearchString={currentSearchString ?? ''}
               />
             ))}
