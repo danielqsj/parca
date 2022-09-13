@@ -69,6 +69,7 @@ interface graphvizObject extends CallgraphNode {
   _gvid: number;
   name: string;
   pos: string;
+  functionName: string;
 }
 
 interface graphvizEdge extends CallgraphEdge {
@@ -232,7 +233,6 @@ const Callgraph = ({graph, sampleUnit, width, colorRange}: Props): JSX.Element =
 
   const nodes: INode[] = objects.map(object => {
     const pos = object.pos.split(',');
-    console.log(object);
     return {
       ...object,
       id: object._gvid,
