@@ -16,22 +16,22 @@ import graphviz from 'graphviz-wasm';
 import * as d3 from 'd3';
 import {Stage, Layer, Circle, Arrow, Text, Label} from 'react-konva';
 import {GraphTooltip as Tooltip} from '@parca/components';
-import {Callgraph as CallgraphType} from '@parca/client';
+import {CallgraphNode, CallgraphEdge, Callgraph as CallgraphType} from '@parca/client';
 import {useAppSelector, selectSearchNodeString} from '@parca/store';
 import {isSearchMatch} from '@parca/functions';
 import {jsonToDot, parseEdgePos} from './utils';
 import type {HoveringNode} from '../GraphTooltip';
 
 interface INode {
+  id: number;
   x: number;
   y: number;
   data: {id: string};
   functionName: string;
-  opacity: number;
   color: string;
+  radius: number;
   mouseX?: number;
   mouseY?: number;
-  radius: number;
 }
 
 interface NodeProps {
@@ -65,6 +65,25 @@ interface Props {
   colorRange: [string, string];
 }
 
+interface graphvizObject extends CallgraphNode {
+  _gvid: number;
+  name: string;
+  pos: string;
+}
+
+interface graphvizEdge extends CallgraphEdge {
+  _gvid: number;
+  tail: number;
+  head: number;
+  pos: string;
+}
+
+interface graphvizType {
+  edges: graphvizEdge[];
+  objects: graphvizObject[];
+  bb: string;
+}
+
 const Node = ({
   node,
   hoveredNode,
@@ -86,7 +105,7 @@ const Node = ({
   const isCurrentSearchMatch = isSearchMatch(currentSearchString, functionName);
 
   return (
-    <Label x={+x} y={+y}>
+    <Label x={Number(x)} y={Number(y)}>
       <Circle
         draggable
         radius={isHovered || isCurrentSearchMatch ? hoverRadius : defaultRadius}
@@ -150,8 +169,8 @@ const Edge = ({
 };
 
 const Callgraph = ({graph, sampleUnit, width, colorRange}: Props): JSX.Element => {
-  const containerRef = useRef<Element>(null);
-  const [graphData, setGraphData] = useState<any>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [graphData, setGraphData] = useState<string | null>(null);
   const [hoveredNode, setHoveredNode] = useState<INode | null>(null);
   const {nodes: rawNodes, cumulative: total} = graph;
   const nodeRadius = 12;
@@ -179,12 +198,16 @@ const Callgraph = ({graph, sampleUnit, width, colorRange}: Props): JSX.Element =
   if (width == null || graphData == null) return <></>;
 
   const height = (2 * width) / 3;
-  const {objects, edges: gvizEdges, bb: boundingBox} = JSON.parse(graphData);
+  const {objects, edges: gvizEdges, bb: boundingBox} = JSON.parse(graphData) as graphvizType;
 
-  const valueRange: number[] = d3
-    .extent(objects.filter(node => node !== undefined).map(node => node.cumulative))
-    .map(value => parseInt(value))
-    .slice(0, 2);
+  const cumulatives: string[] = objects
+    .filter(node => node !== undefined)
+    .map(node => node.cumulative);
+  if (cumulatives.length === 0) {
+    cumulatives.push('0');
+  }
+
+  const valueRange = (d3.extent(cumulatives) as [string, string]).map(value => parseInt(value));
 
   const colorScale = d3
     .scaleSequentialLog(d3.interpolateBlues)
@@ -200,45 +223,45 @@ const Callgraph = ({graph, sampleUnit, width, colorRange}: Props): JSX.Element =
   const graphBB = boundingBox.split(',');
   const xScale = d3
     .scaleLinear()
-    .domain([0, graphBB[2]])
+    .domain([0, Number(graphBB[2])])
     .range([0, width - 2 * margin]);
   const yScale = d3
     .scaleLinear()
-    .domain([0, graphBB[3]])
+    .domain([0, Number(graphBB[3])])
     .range([0, height - 2 * margin]);
 
-  const nodes = objects.map(object => {
+  const nodes: INode[] = objects.map(object => {
     const pos = object.pos.split(',');
+    console.log(object);
     return {
       ...object,
       id: object._gvid,
       x: xScale(parseInt(pos[0])),
       y: yScale(parseInt(pos[1])),
-      color: colorScale(+object.cumulative),
-      data: rawNodes.find(n => n.id === object.name),
+      color: colorScale(Number(object.cumulative)),
+      data: rawNodes.find(n => n.id === object.name) ?? {id: 'n0'},
       radius: nodeRadiusScale(+object.cumulative),
     };
   });
 
-  const edges = gvizEdges.map(edge => ({
+  const edges: IEdge[] = gvizEdges.map(edge => ({
     ...edge,
     source: edge.head,
     target: edge.tail,
     points: edge.pos,
     color: colorRange[1],
-    opacity: colorOpacityScale(+edge.cumulative),
-    nodeRadius: nodeRadiusScale(+edge.cumulative),
+    opacity: colorOpacityScale(Number(edge.cumulative)),
+    nodeRadius: nodeRadiusScale(Number(edge.cumulative)),
   }));
 
   return (
     <div className="relative">
-      {/* @ts-expect-error */}
       <div className={`w-[${width}px] h-[${height}px]`} ref={containerRef}>
         <Stage width={width} height={height}>
           <Layer offsetX={-margin} offsetY={-margin}>
             {edges.map((edge: IEdge) => {
-              const sourceNode = nodes.find(n => n.id === edge.source);
-              const targetNode = nodes.find(n => n.id === edge.target);
+              const sourceNode = nodes.find(n => n.id === edge.source) ?? {x: 0, y: 0};
+              const targetNode = nodes.find(n => n.id === edge.target) ?? {x: 0, y: 0};
               return (
                 <Edge
                   key={`edge-${edge.source}-${edge.target}`}
@@ -251,7 +274,7 @@ const Callgraph = ({graph, sampleUnit, width, colorRange}: Props): JSX.Element =
                 />
               );
             })}
-            {nodes.map((node: INode) => (
+            {nodes.map(node => (
               <Node
                 key={`node-${node.data.id}`}
                 node={node}
